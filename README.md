@@ -22,18 +22,24 @@ A production-grade RAG (Retrieval-Augmented Generation) middleware with a **thre
 
 ## 🖼️ Screenshots
 
-### Query Interface — Live Result with Risk Gauge
-![Query Interface](assets/screenshots/query_interface.png)
-
-### Firewall Stages — PASS/FLAG Badges & Latency Breakdown
-![Firewall Stages](assets/screenshots/firewall_stages.png)
-
-### Evaluation Dashboard — 6 Real-Time Charts
-![Evaluation Dashboard](assets/screenshots/dashboard.png)
-
-### Query Logs — Full History with JSON Drill-Down
-![Query Logs](assets/screenshots/query_logs.png)
-
+<table>
+  <tr>
+    <td><strong>Query Interface — Live Result</strong></td>
+    <td><strong>Firewall Stages — PASS/FLAG Badges</strong></td>
+  </tr>
+  <tr>
+    <td><img src="assets/screenshots/query_interface.png"/></td>
+    <td><img src="assets/screenshots/firewall_stages.png"/></td>
+  </tr>
+  <tr>
+    <td><strong>Evaluation Dashboard</strong></td>
+    <td><strong>Query Logs</strong></td>
+  </tr>
+  <tr>
+    <td><img src="assets/screenshots/dashboard.png"/></td>
+    <td><img src="assets/screenshots/query_logs.png"/></td>
+  </tr>
+</table>
 ---
 
 ## 📊 Evaluation Results
