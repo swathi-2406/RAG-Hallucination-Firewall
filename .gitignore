@@ -1,0 +1,38 @@
+# Environment
+.env
+venv/
+.venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Data & Index (large files, user-generated)
+data/faiss_index/
+data/sample_docs/
+data/query_logs/
+
+# HuggingFace model cache
+.cache/
+
+# IDE
+.vscode/
+.idea/
+*.code-workspace
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Pytest
+.pytest_cache/
+htmlcov/
+.coverage
+
+# Streamlit
+.streamlit/
