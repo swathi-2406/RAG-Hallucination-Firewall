@@ -12,7 +12,7 @@ A production-grade RAG (Retrieval-Augmented Generation) middleware with a **thre
 ---
 
 ## 🎬 Demo
-![RAG Hallucination Firewall Demo](assets\demo.gif)
+![RAG Hallucination Firewall Demo](assets/demo.gif)
 
 [![RAG Hallucination Firewall Demo](https://img.youtube.com/vi/tsqRcIyXGTw/maxresdefault.jpg)](https://youtu.be/tsqRcIyXGTw)
 
