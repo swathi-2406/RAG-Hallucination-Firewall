@@ -11,6 +11,31 @@ A production-grade RAG (Retrieval-Augmented Generation) middleware with a **thre
 
 ---
 
+## 🎬 Demo
+![RAG Hallucination Firewall Demo](assets/demo.gif)
+
+[![RAG Hallucination Firewall Demo](https://img.youtube.com/vi/tsqRcIyXGTw/maxresdefault.jpg)](https://youtu.be/tsqRcIyXGTw)
+
+*Click to watch the full pipeline demo — live query, risk gauge, three-stage firewall, and evaluation dashboard*
+
+---
+
+## 🖼️ Screenshots
+
+### Query Interface — Live Result with Risk Gauge
+![Query Interface](assets/screenshots/query_interface.png)
+
+### Firewall Stages — PASS/FLAG Badges & Latency Breakdown
+![Firewall Stages](assets/screenshots/firewall_stages.png)
+
+### Evaluation Dashboard — 6 Real-Time Charts
+![Evaluation Dashboard](assets/screenshots/dashboard.png)
+
+### Query Logs — Full History with JSON Drill-Down
+![Query Logs](assets/screenshots/query_logs.png)
+
+---
+
 ## 📊 Evaluation Results
 
 Evaluated across **20 questions** spanning 4 adversarial categories on a 198-paper arXiv AI/ML corpus:
@@ -91,7 +116,7 @@ User Query
 | **Composite Score** | Weighted: 35% entropy + 30% JSD + 35% NLI |
 | **Dashboard** | 3-tab Streamlit: Query, Dashboard (6 charts), Query Logs |
 | **Evaluation** | Automated 20-question eval script with 4 adversarial categories |
-| **Tests** | 30+ unit tests with pytest monkeypatching |
+| **Tests** | 37 unit tests, 100% passing |
 | **Zero Cost** | All models run locally; only Groq API call is external (free tier) |
 
 ---
@@ -105,7 +130,7 @@ User Query
 ### 1. Clone & Install
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/rag-hallucination-firewall.git
+git clone https://github.com/swathi-2406/rag-hallucination-firewall.git
 cd rag-hallucination-firewall
 ```
 
@@ -137,7 +162,7 @@ cp .env.example .env        # Mac/Linux
 python scripts/ingest_docs.py
 ```
 
-Downloads ~200 AI/ML paper abstracts from arXiv and builds the FAISS index.  
+Downloads ~200 AI/ML paper abstracts from arXiv and builds the FAISS index.
 Takes 3–5 minutes on first run (downloads embedding model ~90MB, cached after).
 
 ### 4. Run the App
@@ -185,6 +210,8 @@ rag-hallucination-firewall/
 ├── scripts/
 │   ├── ingest_docs.py                  # arXiv download + FAISS index build
 │   └── evaluate_firewall.py            # Automated 20-question evaluation
+├── assets/
+│   └── screenshots/                    # README screenshots
 ├── data/
 │   ├── sample_docs/                    # Auto-populated by ingest_docs.py
 │   ├── faiss_index/                    # Auto-generated FAISS index
@@ -240,7 +267,7 @@ risk = 0.35 × entropy + 0.30 × JSD + 0.35 × NLI_contradiction
 
 ## 📊 Dashboard
 
-**Query Tab** — Run queries and see full results:
+**Query Tab**
 - Answer display with source attribution
 - Risk gauge dial (composite score 0–100%)
 - Stage score bar chart with threshold reference lines
@@ -248,7 +275,7 @@ risk = 0.35 × entropy + 0.30 × JSD + 0.35 × NLI_contradiction
 - Firewall PASS/FLAG badges per stage
 - Expandable: latency breakdown, retrieved chunks, entropy samples
 
-**Dashboard Tab** — Aggregate trends over query history:
+**Dashboard Tab**
 - KPI row: total queries, avg risk, flagged rate, avg faithfulness, avg latency
 - Risk score over time (line chart with LOW/MEDIUM threshold lines)
 - RAGAS metrics over time (context precision, faithfulness, relevancy)
@@ -256,8 +283,8 @@ risk = 0.35 × entropy + 0.30 × JSD + 0.35 × NLI_contradiction
 - Risk label distribution pie chart
 - Per-stage latency averages bar chart
 
-**Query Logs Tab** — Full history:
-- Sortable table with progress bar columns
+**Query Logs Tab**
+- Sortable history with progress bar columns
 - Per-entry drill-down with JSON score breakdown
 - Clear log button
 
@@ -302,7 +329,7 @@ RISK_WEIGHTS = {"entropy": 0.35, "jsd": 0.30, "nli": 0.35}
 pytest tests/ -v
 ```
 
-30+ unit tests across 9 test classes:
+37 unit tests across 9 test classes, 100% passing:
 
 | Class | What Is Tested |
 |---|---|
@@ -332,12 +359,10 @@ Imports moved in LangChain 1.x. If you see `ModuleNotFoundError`:
 # Old (breaks in LangChain 1.x)
 from langchain.schema import Document
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.schema import HumanMessage, SystemMessage
 
 # Correct
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_core.messages import HumanMessage, SystemMessage
 ```
 
 ### Groq model decommissioned
@@ -353,13 +378,6 @@ FAISS 1.12+ saves the index as a folder (`faiss_store/`). Check `Path(INDEX_PATH
 Plotly rejects 8-digit hex colors. Use `rgba()`:
 ```python
 "rgba(34,197,94,0.09)"   # instead of "#22c55e18"
-```
-
-### venv on Windows — packages not found
-If you have Anaconda, skip venv entirely:
-```powershell
-conda activate base
-pip install <packages>
 ```
 
 ---
@@ -379,7 +397,7 @@ Each question runs in both **firewall-enabled** and **baseline** conditions. Res
 - `data/evaluation/eval_report.json` — full per-question results
 - `data/evaluation/eval_summary.txt` — pre-written resume bullets with your actual numbers
 
-**Key finding from evaluation:** Abstract-only corpus limits context precision (0.414). Technical "how does X work" questions retrieve topically-related but shallow chunks, causing the model to hedge. Full-paper ingestion is the primary improvement lever.
+**Key finding from evaluation:** Abstract-only corpus limits context precision (0.414). Technical "how does X work" questions retrieve topically-related but shallow chunks. Full-paper ingestion is the primary improvement lever.
 
 ---
 
