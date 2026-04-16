@@ -36,3 +36,5 @@ htmlcov/
 
 # Streamlit
 .streamlit/
+
+data/
