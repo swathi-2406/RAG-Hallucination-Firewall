@@ -1,18 +1,19 @@
-# 🔥 RAG Hallucination Firewall — Control-Dial System
+# 🔥 RAG Hallucination Firewall
 
-A production-grade RAG (Retrieval-Augmented Generation) middleware with a **three-stage hallucination detection pipeline**, built with LangChain, FAISS, and Groq. Features a real-time Streamlit evaluation dashboard tracking GenAI quality metrics.
+A RAG middleware with a **three-stage hallucination detection pipeline**, built with LangChain, FAISS, and Groq. Features a real-time Streamlit evaluation dashboard tracking GenAI quality metrics.
 
-![Python](https://img.shields.io/badge/Python-3.10+-blue)
-![LangChain](https://img.shields.io/badge/LangChain-1.x-green)
-![FAISS](https://img.shields.io/badge/FAISS-CPU-orange)
-![Streamlit](https://img.shields.io/badge/Streamlit-1.38+-red)
-![Groq](https://img.shields.io/badge/LLM-Groq%20(Free)-purple)
-![License](https://img.shields.io/badge/License-MIT-yellow)
+[![Python](https://img.shields.io/badge/Python-3.10+-blue)](https://www.python.org/)
+[![LangChain](https://img.shields.io/badge/LangChain-1.x-green)](https://github.com/langchain-ai/langchain)
+[![FAISS](https://img.shields.io/badge/FAISS-CPU-orange)](https://github.com/facebookresearch/faiss)
+[![Streamlit](https://img.shields.io/badge/Streamlit-1.38+-red)](https://streamlit.io/)
+[![Groq](https://img.shields.io/badge/LLM-Groq%20(Free)-purple)](https://console.groq.com)
+[![License](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
 
 ---
 
 ## 🎬 Demo
-![RAG Hallucination Firewall Demo](assets/demo.gif)
+
+[![RAG Hallucination Firewall Demo](assets/demo.gif)](assets/demo.gif)
 
 [![RAG Hallucination Firewall Demo](https://img.youtube.com/vi/tsqRcIyXGTw/maxresdefault.jpg)](https://youtu.be/tsqRcIyXGTw)
 
@@ -22,41 +23,41 @@ A production-grade RAG (Retrieval-Augmented Generation) middleware with a **thre
 
 ## 🖼️ Screenshots
 
-<table>
-  <tr>
-    <td><strong>Query Interface — Live Result</strong></td>
-    <td><strong>Firewall Stages — PASS/FLAG Badges</strong></td>
-  </tr>
-  <tr>
-    <td><img src="assets/screenshots/query_interface.png"/></td>
-    <td><img src="assets/screenshots/firewall_stages.png"/></td>
-  </tr>
-  <tr>
-    <td><strong>Evaluation Dashboard</strong></td>
-    <td><strong>Query Logs</strong></td>
-  </tr>
-  <tr>
-    <td><img src="assets/screenshots/dashboard.png"/></td>
-    <td><img src="assets/screenshots/query_logs.png"/></td>
-  </tr>
-</table>
+| **Query Interface — Live Result** | **Firewall Stages — PASS/FLAG Badges** |
+|---|---|
+| ![](assets/screenshots/query_interface.png) | ![](assets/screenshots/firewall_stages.png) |
+| **Evaluation Dashboard** | **Query Logs** |
+| ![](assets/screenshots/dashboard.png) | ![](assets/screenshots/query_logs.png) |
+
 ---
 
 ## 📊 Evaluation Results
 
-Evaluated across **20 questions** spanning 4 adversarial categories on a 198-paper arXiv AI/ML corpus:
+Evaluated across **20 questions** spanning 4 categories on a 198-paper arXiv AI/ML corpus (abstracts only).
 
-| Metric | Result |
-|---|---|
-| **Retrieval Latency** | **162ms** avg (target: <200ms ✅) |
-| **Risk Classification Accuracy** | **100%** — correct LOW/MEDIUM/HIGH on all 20 queries |
-| **False Positive Rate** | **0%** — no well-grounded answers wrongly flagged |
-| **Out-of-Scope Refusal Rate** | **100%** — model correctly refused all irrelevant queries |
-| **Answer Relevancy** | **0.825** avg |
-| **Answer Faithfulness** | **0.563** avg |
-| **Context Precision** | **0.414** avg (abstracts-only corpus; full papers would push >0.70) |
+> ⚠️ **Sample size caveat**: n=20 means all percentages carry a 95% confidence interval of approximately ±22 percentage points (Wilson score interval). These results are directional indicators, not statistically definitive benchmarks. Ground-truth labels are heuristic (keyword matching + hedge-phrase detection), not human-verified.
 
-> **Note on context precision:** The corpus uses paper *abstracts* only, which limits retrieval depth on technical mechanistic questions. Ingesting full papers would significantly improve this metric.
+### Retrieval & Quality
+
+| Metric | Result | Notes |
+|---|---|---|
+| **Retrieval Latency** | **162ms** avg | Target: <200ms ✅ |
+| **Context Precision** | **0.414** avg | Limited by abstract-only corpus; full-paper ingestion would improve this |
+| **Answer Faithfulness** | **0.563** avg | Cosine similarity proxy, not semantic entailment |
+| **Answer Relevancy** | **0.825** avg | |
+
+### Per-Stage Firewall Analysis
+
+The key insight from ablation: the three stages are not equally useful.
+
+| Stage | False Positive Rate (in-scope) | "True Positive" Rate (risky queries) | Notes |
+|---|---|---|---|
+| S1 Semantic Entropy | Low | Moderate | Reliable uncertainty signal |
+| S2 JSD | **Very high** | High | ⚠ See JSD section below |
+| S3 NLI (DeBERTa) | Low | Moderate | Strongest semantic signal |
+| Composite | Low | High | Reweighted: NLI 45%, Entropy 35%, JSD 20% |
+
+> **Why JSD has a high false positive rate**: JSD measures token-frequency divergence between context (long, multi-chunk) and answer (short, paraphrased). Natural language answers routinely produce JSD 0.60–0.95 vs. their source context simply because answers are shorter and use different surface forms. The threshold was recalibrated from 0.45 → 0.80 to match empirical baselines; JSD weight was reduced from 30% → 20% in the composite. See `config/settings.py` for full calibration notes.
 
 ---
 
@@ -71,6 +72,9 @@ User Query
 │  RecursiveCharacterTextSplitter (512 chars, 50 overlap)
 │  all-MiniLM-L6-v2 embeddings (384-dim, local)        │
 │  FAISS IndexFlatIP + MMR (λ=0.3) — sub-200ms         │
+│                                                      │
+│  Note: IndexFlatIP = exact search, O(n). Scales to   │
+│  ~10K chunks; use IndexIVFFlat for larger corpora.   │
 └──────────────────────────┬───────────────────────────┘
                            │  Top-K Chunks (MMR)
                            ▼
@@ -87,18 +91,25 @@ User Query
 │             5 LLM samples at temp=0.7                │
 │             mean pairwise cosine distance            │
 │             threshold: 0.35                          │
+│             Note: simplified vs. Farquhar et al.     │
+│             (uses raw embedding distance, not        │
+│              semantic equivalence classes)           │
 │                                                      │
 │  Stage 2 ── Jensen-Shannon Divergence                │
 │             token frequency distributions            │
 │             context vs answer vocabulary             │
-│             threshold: 0.45                          │
+│             threshold: 0.80 (recalibrated)           │
+│             ⚠ Bag-of-words; high FP for paraphrase  │
+│             Best used as extreme-OOV detector        │
 │                                                      │
 │  Stage 3 ── DeBERTa NLI Cross-Check                  │
 │             cross-encoder/nli-deberta-v3-small       │
 │             max contradiction prob across chunks     │
 │             threshold: 0.50                          │
+│             Strongest signal; semantic-level check   │
 │                                                      │
-│  composite = 0.35·S1 + 0.30·S2 + 0.35·S3            │
+│  composite = 0.35·S1 + 0.20·S2 + 0.45·S3            │
+│  (reweighted: NLI upweighted; JSD downweighted)      │
 └──────────────────────────┬───────────────────────────┘
                            │
                            ▼
@@ -112,16 +123,16 @@ User Query
 
 | Feature | Detail |
 |---|---|
-| **Chunking** | `RecursiveCharacterTextSplitter` (512 chars, 50 overlap, hierarchy: paragraph→sentence→word→char) |
+| **Chunking** | `RecursiveCharacterTextSplitter` (512 chars, 50 overlap) |
 | **Embeddings** | `sentence-transformers/all-MiniLM-L6-v2` — local, free, L2-normalized 384-dim |
 | **Vector Store** | FAISS `IndexFlatIP` + MMR retrieval (4× candidate fetch, λ=0.3) |
 | **LLM** | Groq API — `llama-3.3-70b-versatile` (free tier) |
 | **Stage 1** | Semantic entropy: mean pairwise cosine distance across N=5 stochastic samples |
-| **Stage 2** | Jensen-Shannon divergence between context and answer token distributions |
+| **Stage 2** | Jensen-Shannon divergence (bag-of-words; see limitations) |
 | **Stage 3** | `cross-encoder/nli-deberta-v3-small` NLI — max contradiction prob across chunks |
-| **Composite Score** | Weighted: 35% entropy + 30% JSD + 35% NLI |
+| **Composite Score** | Weighted: **45% NLI + 35% Entropy + 20% JSD** |
 | **Dashboard** | 3-tab Streamlit: Query, Dashboard (6 charts), Query Logs |
-| **Evaluation** | Automated 20-question eval script with 4 adversarial categories |
+| **Evaluation** | Per-stage ablation, Wilson CIs, honest caveats |
 | **Tests** | 37 unit tests, 100% passing |
 | **Zero Cost** | All models run locally; only Groq API call is external (free tier) |
 
@@ -130,6 +141,7 @@ User Query
 ## 🚀 Quick Start
 
 ### Prerequisites
+
 - Python 3.10+ (Anaconda recommended on Windows)
 - Free Groq API key from [console.groq.com](https://console.groq.com) — no credit card needed
 
@@ -141,11 +153,9 @@ cd rag-hallucination-firewall
 ```
 
 **Windows (Anaconda — recommended):**
-```powershell
+```bash
 conda activate base
-
 pip install torch --index-url https://download.pytorch.org/whl/cpu
-
 pip install langchain langchain-community langchain-groq langchain-text-splitters langchain-core langchain-huggingface faiss-cpu sentence-transformers transformers scipy numpy ragas datasets arxiv pypdf streamlit plotly pandas python-dotenv pydantic tenacity tqdm
 ```
 
@@ -177,7 +187,7 @@ Takes 3–5 minutes on first run (downloads embedding model ~90MB, cached after)
 streamlit run app.py
 ```
 
-Open [http://localhost:8501](http://localhost:8501)
+Open http://localhost:8501
 
 ### 5. (Optional) Run Automated Evaluation
 
@@ -185,7 +195,7 @@ Open [http://localhost:8501](http://localhost:8501)
 python scripts/evaluate_firewall.py
 ```
 
-Runs 20 questions through the pipeline twice (firewall on vs off) and generates resume-ready metrics in `data/evaluation/eval_summary.txt`. Takes ~20 minutes.
+Runs 20 questions with per-stage ablation analysis. Takes ~20 minutes. Results in `data/evaluation/`.
 
 ---
 
@@ -193,38 +203,28 @@ Runs 20 questions through the pipeline twice (firewall on vs off) and generates 
 
 ```
 rag-hallucination-firewall/
-├── app.py                              # Streamlit dashboard (3 tabs)
+├── app.py
 ├── requirements.txt
 ├── .env.example
-├── setup.bat                           # Windows one-click setup
-├── pytest.ini
 ├── config/
-│   └── settings.py                     # All tuneable parameters
+│   └── settings.py              # All parameters with calibration notes
 ├── src/
 │   ├── retrieval/
-│   │   ├── chunker.py                  # RecursiveCharacterTextSplitter
-│   │   ├── embedder.py                 # all-MiniLM-L6-v2 singleton
-│   │   └── retriever.py                # FAISS + MMR, latency tracking
+│   │   ├── chunker.py
+│   │   ├── embedder.py
+│   │   └── retriever.py
 │   ├── hallucination/
-│   │   ├── firewall.py                 # Orchestrates all 3 stages
-│   │   ├── stage1_entropy.py           # Semantic entropy scoring
-│   │   ├── stage2_jsd.py               # Jensen-Shannon divergence
-│   │   └── stage3_nli.py               # DeBERTa NLI cross-check
+│   │   ├── firewall.py          # Orchestrates all 3 stages
+│   │   ├── stage1_entropy.py    # Semantic entropy scoring
+│   │   ├── stage2_jsd.py        # JSD (with limitations documented)
+│   │   └── stage3_nli.py        # DeBERTa NLI cross-check
 │   └── evaluation/
-│       ├── metrics.py                  # Context precision, faithfulness, relevancy
-│       └── logger.py                   # JSONL query log persistence
+│       ├── metrics.py
+│       └── logger.py
 ├── scripts/
-│   ├── ingest_docs.py                  # arXiv download + FAISS index build
-│   └── evaluate_firewall.py            # Automated 20-question evaluation
-├── assets/
-│   └── screenshots/                    # README screenshots
-├── data/
-│   ├── sample_docs/                    # Auto-populated by ingest_docs.py
-│   ├── faiss_index/                    # Auto-generated FAISS index
-│   └── evaluation/                     # eval_report.json + eval_summary.txt
+│   ├── ingest_docs.py
+│   └── evaluate_firewall.py     # Per-stage ablation + honest caveats
 └── tests/
-    ├── test_retrieval.py               # Chunker, embedder, retriever tests
-    └── test_hallucination.py           # Firewall, metrics, logger tests
 ```
 
 ---
@@ -232,99 +232,76 @@ rag-hallucination-firewall/
 ## 💡 How the Hallucination Firewall Works
 
 ### Stage 1 — Semantic Entropy
+
 Samples N=5 outputs from the LLM at temperature=0.7. Embeds each using the same sentence-transformer. Computes mean pairwise cosine distance:
 
 ```
 entropy = mean({ 1 - cos_sim(e_i, e_j) | i < j })
 ```
 
-Near 0 = model is consistent → low risk. Near 1 = outputs diverge → high uncertainty → hallucination risk. Inspired by *Semantic Entropy* (Farquhar et al., 2023).
+Near 0 = model is consistent → low risk. Near 1 = outputs diverge → high uncertainty.
+
+**Implementation note**: This is a simplified approximation of [Farquhar et al. (2023)](https://arxiv.org/abs/2302.09664). The original paper clusters outputs into semantic equivalence classes before computing entropy; this implementation uses raw embedding distance, which is computationally simpler but may conflate surface-form variation with semantic uncertainty.
 
 ### Stage 2 — Jensen-Shannon Divergence
-Tokenizes context and answer (stopwords removed, Laplace smoothed). Computes JSD between token frequency distributions:
+
+Computes JSD between token frequency distributions of context and answer:
 
 ```
 JSD(P||Q) = ½·KL(P||M) + ½·KL(Q||M),   M = ½(P+Q)
 ```
 
-Symmetric, bounded [0,1], always finite. High JSD = answer uses vocabulary not grounded in the retrieved context.
+**⚠ Important limitation**: JSD is a bag-of-words measure. In practice, answers naturally score JSD 0.60–0.95 vs. their source context because:
+- Answers are shorter and more focused than multi-chunk context passages
+- Answers paraphrase; they don't copy exact wording
+- Technical synonyms count as distinct tokens
+
+The threshold is set at 0.80 (empirically calibrated on this corpus's in-scope vs. out-of-scope JSD distributions). At this threshold, Stage 2 functions as an extreme out-of-vocabulary detector — flagging answers that share almost no vocabulary with the context — not a subtle grounding checker.
+
+For stronger token-level grounding analysis, consider replacing JSD with [BERTScore](https://github.com/Tiiiger/bert_score), which maps tokens to embedding space before comparing.
 
 ### Stage 3 — NLI Cross-Check
+
 Runs `cross-encoder/nli-deberta-v3-small` (~85MB, runs locally) on each (context chunk, answer) pair. Takes the **maximum** contradiction probability:
 
 ```
 Stage3_score = max(P(CONTRADICTION | chunk_i, answer))
 ```
 
-Catches answers that are fluent and confident but directly contradict retrieved evidence.
+This is the strongest and most semantically precise stage. It catches answers that are fluent and confident but directly contradict retrieved evidence, regardless of surface-level vocabulary differences.
 
 ### Composite Risk Score
+
 ```
-risk = 0.35 × entropy + 0.30 × JSD + 0.35 × NLI_contradiction
+risk = 0.35 × entropy + 0.20 × JSD + 0.45 × NLI
 ```
+
+Weight rationale: NLI carries the most semantic precision and lowest false positive rate. JSD is downweighted due to high false positive rate from paraphrase behavior. Entropy provides a reliable LLM-uncertainty signal.
 
 | Band | Score | Meaning |
 |---|---|---|
-| 🟢 LOW | 0.00 – 0.30 | Answer is grounded and consistent |
-| 🟡 MEDIUM | 0.30 – 0.60 | Uncertainty detected; review recommended |
-| 🔴 HIGH | 0.60 – 1.00 | High hallucination probability |
-
----
-
-## 📊 Dashboard
-
-**Query Tab**
-- Answer display with source attribution
-- Risk gauge dial (composite score 0–100%)
-- Stage score bar chart with threshold reference lines
-- RAGAS metric cards (context precision, faithfulness, latency)
-- Firewall PASS/FLAG badges per stage
-- Expandable: latency breakdown, retrieved chunks, entropy samples
-
-**Dashboard Tab**
-- KPI row: total queries, avg risk, flagged rate, avg faithfulness, avg latency
-- Risk score over time (line chart with LOW/MEDIUM threshold lines)
-- RAGAS metrics over time (context precision, faithfulness, relevancy)
-- Average stage scores bar chart
-- Risk label distribution pie chart
-- Per-stage latency averages bar chart
-
-**Query Logs Tab**
-- Sortable history with progress bar columns
-- Per-entry drill-down with JSON score breakdown
-- Clear log button
+| 🟢 LOW | 0.00–0.30 | Answer is grounded and consistent |
+| 🟡 MEDIUM | 0.30–0.60 | Uncertainty detected; review recommended |
+| 🔴 HIGH | 0.60–1.00 | High hallucination probability |
 
 ---
 
 ## ⚙️ Configuration
 
-All parameters in `config/settings.py`:
+All parameters in `config/settings.py` with calibration notes:
 
 ```python
-# Retrieval
-CHUNK_SIZE = 512          # characters per chunk
-CHUNK_OVERLAP = 50        # overlap between chunks
-TOP_K = 5                 # chunks to retrieve
-MMR_DIVERSITY = 0.3       # 0=max diversity, 1=max relevance
-
-# LLM
-GROQ_MODEL = "llama-3.3-70b-versatile"
-LLM_TEMP = 0.0            # deterministic final answer
-
-# Stage 1 — Entropy
-ENTROPY_SAMPLES = 5       # stochastic samples
-ENTROPY_TEMP = 0.7        # sampling temperature
-ENTROPY_THRESHOLD = 0.35  # flag above this
+# Stage 1 — Semantic Entropy
+ENTROPY_THRESHOLD = 0.35  # Validated: in-scope avg 0.07, out-of-scope avg 0.10
 
 # Stage 2 — JSD
-JSD_THRESHOLD = 0.45      # flag above this
+JSD_THRESHOLD = 0.80      # Recalibrated from 0.45; in-scope median 0.73 vs OOS 0.96
 
 # Stage 3 — NLI
-NLI_MODEL = "cross-encoder/nli-deberta-v3-small"
-NLI_THRESHOLD = 0.50      # flag above this
+NLI_THRESHOLD = 0.50
 
 # Composite weights (must sum to 1.0)
-RISK_WEIGHTS = {"entropy": 0.35, "jsd": 0.30, "nli": 0.35}
+RISK_WEIGHTS = {"entropy": 0.35, "jsd": 0.20, "nli": 0.45}
 ```
 
 ---
@@ -335,119 +312,61 @@ RISK_WEIGHTS = {"entropy": 0.35, "jsd": 0.30, "nli": 0.35}
 pytest tests/ -v
 ```
 
-37 unit tests across 9 test classes, 100% passing:
-
-| Class | What Is Tested |
-|---|---|
-| `TestChunker` | Splitting, metadata preservation, overlap |
-| `TestEmbedder` | Dimensionality, normalization, similarity ordering, singleton |
-| `TestRetriever` | Context string formatting, separators |
-| `TestSemanticEntropy` | Identical=low entropy, diverse=high, bounded [0,1] |
-| `TestJensenShannon` | Zero JSD identity, symmetry, stopword removal, debug info |
-| `TestNLI` | Structure validation, high/low contradiction (mocked) |
-| `TestCompositeRisk` | Weight correctness, boundary values, risk label thresholds |
-| `TestEvaluationMetrics` | Score ranges, grounded vs unrelated answer scoring |
-| `TestLogger` | Log/load/clear JSONL with temporary path monkeypatching |
+37 unit tests across 9 test classes, 100% passing.
 
 ---
 
 ## 🐛 Known Issues & Fixes
 
+### Stage 1 total latency is ~5–8 seconds
+
+Stage 1 makes 5 synchronous Groq API calls sequentially. The 162ms figure in the README refers to retrieval latency only. Total pipeline latency including all 3 stages is approximately 5–10 seconds. **Fix on roadmap**: async parallel entropy sampling.
+
 ### Windows — PyTorch won't install from pip
-PyTorch is not on standard PyPI. Use the official CPU wheel:
-```powershell
+
+```bash
 pip install torch --index-url https://download.pytorch.org/whl/cpu
 ```
 
 ### LangChain 1.x import changes
-Imports moved in LangChain 1.x. If you see `ModuleNotFoundError`:
-```python
-# Old (breaks in LangChain 1.x)
-from langchain.schema import Document
-from langchain.text_splitter import RecursiveCharacterTextSplitter
 
-# Correct
+```python
+# Correct (LangChain 1.x)
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 ```
 
-### Groq model decommissioned
-`llama3-8b-8192` was removed. Update `config/settings.py`:
-```python
-GROQ_MODEL = "llama-3.3-70b-versatile"
-```
-
 ### FAISS saves as folder not files
-FAISS 1.12+ saves the index as a folder (`faiss_store/`). Check `Path(INDEX_PATH).exists()` not `Path(INDEX_PATH + ".faiss").exists()`.
 
-### Plotly alpha hex colors
-Plotly rejects 8-digit hex colors. Use `rgba()`:
-```python
-"rgba(34,197,94,0.09)"   # instead of "#22c55e18"
-```
-
----
-
-## 📈 Evaluation Methodology
-
-`scripts/evaluate_firewall.py` runs a structured evaluation across 4 question categories:
-
-| Category | Count | Description |
-|---|---|---|
-| `in_scope` | 8 | Well-covered topics (RAG, transformers, BERT, GNNs, diffusion models...) |
-| `partial` | 4 | Partially covered (specific benchmark numbers, parameter counts...) |
-| `out_scope` | 4 | Completely irrelevant (recipes, sports, tourism, car maintenance...) |
-| `trap` | 4 | Adversarial leading questions designed to induce hallucination |
-
-Each question runs in both **firewall-enabled** and **baseline** conditions. Results saved to:
-- `data/evaluation/eval_report.json` — full per-question results
-- `data/evaluation/eval_summary.txt` — pre-written resume bullets with your actual numbers
-
-**Key finding from evaluation:** Abstract-only corpus limits context precision (0.414). Technical "how does X work" questions retrieve topically-related but shallow chunks. Full-paper ingestion is the primary improvement lever.
+FAISS 1.12+ saves as a folder (`faiss_store/`). Check `Path(INDEX_PATH).exists()` not `Path(INDEX_PATH + ".faiss").exists()`.
 
 ---
 
 ## 🗺️ Roadmap
 
-- [ ] Async parallel entropy sampling (cut Stage 1 from ~5s to ~1s)
-- [ ] Cross-encoder reranking before firewall (target context precision >0.70)
-- [ ] Full-paper PDF ingestion for richer retrieval
-- [ ] UMAP embedding space visualization in dashboard
-- [ ] Answer citation: map each sentence back to its source chunk
-- [ ] FastAPI REST wrapper for programmatic access
-- [ ] Docker container for reproducible deployment
+- [ ] **Async parallel entropy sampling** — cut Stage 1 from ~5s to ~1s
+- [ ] **Replace JSD with BERTScore** — token-level semantic similarity vs. frequency divergence
+- [ ] **Cross-encoder reranking** before firewall (target context precision >0.70)
+- [ ] **Full-paper PDF ingestion** for richer retrieval (target faithfulness >0.70)
+- [ ] **Larger evaluation set** — target n≥200 with human-verified labels for statistically meaningful results
+- [ ] **UMAP embedding space visualization** in dashboard
+- [ ] **Answer citation** — map each answer sentence back to its source chunk
+- [ ] **FastAPI REST wrapper** for programmatic access
+- [ ] **Docker container** for reproducible deployment
 
 ---
 
-## 🛠️ Tech Stack
+## 📚 Related Work & Acknowledgements
 
-| Component | Technology | Purpose |
-|---|---|---|
-| Orchestration | LangChain 1.x | Pipeline, document loaders |
-| Text Splitting | langchain-text-splitters | RecursiveCharacterTextSplitter |
-| Vector Store | FAISS CPU 1.12+ | In-memory ANN, no server needed |
-| Embeddings | sentence-transformers | Local MiniLM, 384-dim vectors |
-| LLM | Groq API (free) | llama-3.3-70b-versatile |
-| NLI Model | DeBERTa-v3-small | Local cross-encoder, ~85MB |
-| Statistics | scipy + numpy | JSD computation |
-| Dashboard | Streamlit 1.38+ | Interactive web UI |
-| Charts | Plotly 5.x | Gauge, bar, line, pie charts |
-| Data | pandas | Query log aggregation |
-| Ingestion | arxiv 3.0 | Free arXiv API, no key needed |
-| Testing | pytest | Unit tests + monkeypatching |
+- [Farquhar et al. (2023)](https://arxiv.org/abs/2302.09664) — Semantic Entropy (Stage 1 inspiration)
+- [LangChain](https://github.com/langchain-ai/langchain) — Pipeline orchestration
+- [FAISS](https://github.com/facebookresearch/faiss) — Vector search
+- [Groq](https://console.groq.com) — Free LLM inference
+- [arXiv](https://arxiv.org) — Free research paper corpus
+- [RAGAS](https://github.com/explodinggradients/ragas) — Evaluation metric inspiration
 
 ---
 
 ## 📄 License
 
 MIT
-
----
-
-## 🙏 Acknowledgements
-
-- [Farquhar et al. (2023)](https://arxiv.org/abs/2302.09664) — Semantic Entropy paper
-- [LangChain](https://github.com/langchain-ai/langchain) — Pipeline orchestration
-- [FAISS](https://github.com/facebookresearch/faiss) — Vector search
-- [Groq](https://console.groq.com) — Free LLM inference
-- [arXiv](https://arxiv.org) — Free research paper corpus

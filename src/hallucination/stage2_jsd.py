@@ -10,6 +10,21 @@ Approach:
 
 JSD is a symmetric, bounded (0–1 with log base 2) divergence measure
 derived from KL divergence. It's ideal for comparing sparse distributions.
+
+IMPORTANT LIMITATION:
+  JSD operates on bag-of-words token frequencies. It does NOT understand
+  paraphrase, synonymy, or concept-level overlap. An answer that correctly
+  paraphrases the context using different words will score high JSD and
+  may be flagged even when it is perfectly grounded. Conversely, an answer
+  that copies exact phrases from a hallucinated chunk will score low JSD.
+
+  This makes JSD a weak standalone signal. It is most useful as a
+  supplementary signal in the composite score, weighted lower than
+  the NLI stage. The threshold is intentionally high (0.80) to avoid
+  flagging normal paraphrase behavior.
+
+  For stronger token-overlap-based grounding, consider using BERTScore
+  (which maps tokens to embedding space before comparing) as a replacement.
 """
 
 import logging
@@ -70,6 +85,12 @@ def compute_jsd(context: str, answer: str) -> Tuple[float, dict]:
     Returns:
         (jsd_score, debug_info)
         jsd_score: float in [0, 1] (0 = identical distributions)
+
+    Note on expected ranges:
+        In practice, answers routinely score JSD 0.60–0.95 vs. their source
+        context because answers are shorter and use different surface forms.
+        The threshold (JSD_THRESHOLD) must be calibrated empirically on your
+        corpus; the default of 0.80 reflects this natural baseline.
     """
     context_tokens = tokenize(context)
     answer_tokens = tokenize(answer)
@@ -92,6 +113,12 @@ def compute_jsd(context: str, answer: str) -> Tuple[float, dict]:
         "vocab_size": len(vocab),
         "top_context_tokens": Counter(context_tokens).most_common(5),
         "top_answer_tokens": Counter(answer_tokens).most_common(5),
+        "note": (
+            "JSD naturally runs 0.60–0.95 for answer vs. context. "
+            "Flag threshold is intentionally high to avoid false positives "
+            "from normal paraphrasing. Use NLI (Stage 3) for stronger "
+            "semantic grounding checks."
+        ),
     }
 
     return jsd_score, debug
