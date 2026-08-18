@@ -7,6 +7,9 @@ A RAG middleware with a **three-stage hallucination detection pipeline**, built 
 [![FAISS](https://img.shields.io/badge/FAISS-CPU-orange)](https://github.com/facebookresearch/faiss)
 [![Streamlit](https://img.shields.io/badge/Streamlit-1.38+-red)](https://streamlit.io/)
 [![Groq](https://img.shields.io/badge/LLM-Groq%20(Free)-purple)](https://console.groq.com)
+[![Docker](https://img.shields.io/badge/Docker-Compose-2496ED)](https://docs.docker.com/compose/)
+[![Kubernetes](https://img.shields.io/badge/Kubernetes-manifests-326CE5)](k8s/)
+[![Kafka](https://img.shields.io/badge/Kafka-event%20streaming-black)](https://kafka.apache.org/)
 [![License](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
 
 ---
@@ -206,6 +209,16 @@ rag-hallucination-firewall/
 ├── app.py
 ├── requirements.txt
 ├── .env.example
+├── Dockerfile
+├── docker-compose.yml            # app + Kafka + monitoring consumer
+├── k8s/                          # Kubernetes manifests (namespace → app)
+│   ├── 00-namespace.yaml
+│   ├── 01-configmap.yaml
+│   ├── 02-secret.example.yaml
+│   ├── 03-data-pvc.yaml
+│   ├── 10-kafka.yaml
+│   ├── 20-app.yaml
+│   └── 21-kafka-consumer.yaml
 ├── config/
 │   └── settings.py              # All parameters with calibration notes
 ├── src/
@@ -218,12 +231,15 @@ rag-hallucination-firewall/
 │   │   ├── stage1_entropy.py    # Semantic entropy scoring
 │   │   ├── stage2_jsd.py        # JSD (with limitations documented)
 │   │   └── stage3_nli.py        # DeBERTa NLI cross-check
-│   └── evaluation/
-│       ├── metrics.py
-│       └── logger.py
+│   ├── evaluation/
+│   │   ├── metrics.py
+│   │   └── logger.py            # writes JSONL + publishes to Kafka
+│   └── streaming/
+│       └── kafka_producer.py    # best-effort event publisher
 ├── scripts/
 │   ├── ingest_docs.py
-│   └── evaluate_firewall.py     # Per-stage ablation + honest caveats
+│   ├── evaluate_firewall.py     # Per-stage ablation + honest caveats
+│   └── kafka_consumer.py        # standalone monitoring service
 └── tests/
 ```
 
@@ -342,6 +358,76 @@ FAISS 1.12+ saves as a folder (`faiss_store/`). Check `Path(INDEX_PATH).exists()
 
 ---
 
+## 🐳 Docker & Kubernetes Deployment
+
+The app, and the optional Kafka event stream described below, can run as containers.
+
+### Docker Compose (app + Kafka + monitoring consumer)
+
+```bash
+cp .env.example .env               # add your DEEPSEEK_API_KEY
+docker compose build
+docker compose run --rm app python scripts/ingest_docs.py   # one-time: build the FAISS index
+docker compose up
+```
+
+This starts three containers:
+
+| Service | What it does |
+|---|---|
+| `app` | Streamlit dashboard on http://localhost:8501 |
+| `kafka` | Single-broker Kafka (KRaft mode, no Zookeeper) |
+| `kafka-consumer` | Standalone monitoring service — see below |
+
+To run the app **without** Kafka (matches the plain `streamlit run app.py` flow), just leave `KAFKA_ENABLED=false` in `.env` and run `docker compose up app` — the `depends_on: kafka` in `docker-compose.yml` only applies when you bring up the full stack.
+
+### Kubernetes
+
+Manifests are in `k8s/`, applied in order:
+
+```bash
+docker build -t your-registry/rag-hallucination-firewall:latest .
+docker push your-registry/rag-hallucination-firewall:latest
+# update the image: field in k8s/20-app.yaml and k8s/21-kafka-consumer.yaml first
+
+kubectl apply -f k8s/00-namespace.yaml
+kubectl apply -f k8s/01-configmap.yaml
+kubectl create secret generic rag-firewall-secrets -n rag-firewall \
+  --from-literal=DEEPSEEK_API_KEY=sk-your-real-key   # see k8s/02-secret.example.yaml
+kubectl apply -f k8s/03-data-pvc.yaml
+kubectl apply -f k8s/10-kafka.yaml
+kubectl apply -f k8s/20-app.yaml
+kubectl apply -f k8s/21-kafka-consumer.yaml
+
+kubectl -n rag-firewall port-forward svc/rag-firewall-app 8501:80
+```
+
+This deploys the app, a single-node Kafka broker, and the monitoring consumer as separate Deployments — each independently scalable/restartable. The single-node Kafka setup here is sized for a demo, not a production cluster (see comments in `k8s/10-kafka.yaml`); swap in a managed Kafka service or the Strimzi operator for that.
+
+**Ingestion**: the FAISS index isn't rebuilt automatically in the container. Run it once against the shared PVC:
+```bash
+kubectl -n rag-firewall exec -it deploy/rag-firewall-app -- python scripts/ingest_docs.py
+```
+
+## 📡 Kafka Event Streaming
+
+Every query that runs through the firewall already gets logged to `data/query_logs/query_log.jsonl` for the dashboard (`src/evaluation/logger.py`). With `KAFKA_ENABLED=true`, the same event — composite risk score, per-stage scores, risk label, latencies — is also published to a `query-events` Kafka topic, so other services can consume it independently of the Streamlit app:
+
+```
+run_firewall() → log_query() ──┬─→ query_log.jsonl  (dashboard reads this)
+                                └─→ Kafka "query-events" topic  (any consumer)
+```
+
+- **Producer**: `src/streaming/kafka_producer.py`. Fire-and-forget, non-blocking, and a safe no-op when `KAFKA_ENABLED=false` or no broker is reachable — the dashboard never depends on Kafka being up.
+- **Consumer**: `scripts/kafka_consumer.py` is one example subscriber — it prints a live line per query (🔴 alerting on HIGH risk) and maintains a rolling aggregate in `data/query_logs/kafka_consumer_stats.json`. A Slack/PagerDuty alerter, a Prometheus exporter, or a separate aggregation job would subscribe to the same topic the same way.
+
+Run it standalone against the compose stack:
+```bash
+docker compose up -d kafka
+docker compose run --rm -e KAFKA_ENABLED=true -e KAFKA_BOOTSTRAP_SERVERS=kafka:29092 \
+  app python scripts/kafka_consumer.py
+```
+
 ## 🗺️ Roadmap
 
 - [ ] **Async parallel entropy sampling** — cut Stage 1 from ~5s to ~1s
@@ -352,7 +438,10 @@ FAISS 1.12+ saves as a folder (`faiss_store/`). Check `Path(INDEX_PATH).exists()
 - [ ] **UMAP embedding space visualization** in dashboard
 - [ ] **Answer citation** — map each answer sentence back to its source chunk
 - [ ] **FastAPI REST wrapper** for programmatic access
-- [ ] **Docker container** for reproducible deployment
+- [x] **Docker container** for reproducible deployment
+- [x] **Kafka event streaming** for downstream monitoring/alerting
+- [x] **Kubernetes manifests** for multi-service deployment
+- [ ] **Multi-broker Kafka / managed Kafka** for production use (current setup is single-node)
 
 ---
 

@@ -1,21 +1,6 @@
 """
 src/hallucination/stage3_nli.py
-Stage 3 of the Hallucination Firewall: NLI Cross-Check via DeBERTa.
-
-Approach:
-  1. For each retrieved chunk, run NLI with (premise=chunk, hypothesis=answer)
-  2. Collect contradiction probabilities across all chunks
-  3. If the maximum contradiction probability exceeds the threshold → flag
-
-Using `cross-encoder/nli-deberta-v3-small`:
-  - ~85MB download, runs fully locally (CPU)
-  - Labels: CONTRADICTION, ENTAILMENT, NEUTRAL
-  - Fine-tuned on MNLI + SNLI, strong zero-shot NLI performance
-
-Why cross-encoder NLI?
-  A standard LLM might generate a fluent, confident-sounding answer that
-  directly contradicts what the retrieved evidence says. NLI catches this
-  at the semantic entailment level, not just token overlap.
+Stage 3: DeBERTa NLI cross-check — runs locally, no API needed.
 """
 
 import logging
@@ -23,89 +8,80 @@ import time
 from typing import List
 
 import numpy as np
-from transformers import pipeline
+import torch
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
 from config.settings import NLI_MODEL, NLI_THRESHOLD
 
 logger = logging.getLogger(__name__)
+_nli_tokenizer = None
+_nli_model = None
+_contradiction_idx = None
 
-# Module-level singleton
-_nli_pipeline = None
 
-
-def get_nli_pipeline():
-    """Load the DeBERTa NLI pipeline once and cache it."""
-    global _nli_pipeline
-    if _nli_pipeline is None:
-        logger.info(f"Loading NLI model: {NLI_MODEL} (first run downloads ~85MB)")
-        _nli_pipeline = pipeline(
-            "zero-shot-classification",
-            model=NLI_MODEL,
-            device=-1,  # CPU
-        )
-        logger.info("NLI model loaded.")
-    return _nli_pipeline
+def get_nli_model():
+    global _nli_tokenizer, _nli_model, _contradiction_idx
+    if _nli_model is None:
+        logger.info(f"Loading NLI model: {NLI_MODEL}")
+        _nli_tokenizer = AutoTokenizer.from_pretrained(NLI_MODEL)
+        _nli_model = AutoModelForSequenceClassification.from_pretrained(NLI_MODEL)
+        _nli_model.eval()
+        # Read the contradiction label's index from the model's own config
+        # rather than assuming a fixed order -- cross-encoder NLI checkpoints
+        # aren't all labeled [contradiction, entailment, neutral] in the same
+        # order, so trust id2label instead of a hardcoded index.
+        id2label = {i: str(l).lower() for i, l in _nli_model.config.id2label.items()}
+        match = [i for i, l in id2label.items() if "contra" in l]
+        if not match:
+            raise ValueError(f"No 'contradiction' label found in {NLI_MODEL} id2label: {id2label}")
+        _contradiction_idx = match[0]
+        logger.info(f"NLI model loaded. id2label={id2label}, contradiction_idx={_contradiction_idx}")
+    return _nli_tokenizer, _nli_model, _contradiction_idx
 
 
 def _get_contradiction_prob(chunk_text: str, answer: str) -> float:
     """
-    Run NLI for a single (premise, hypothesis) pair.
+    Proper premise/hypothesis NLI: premise = the retrieved context chunk,
+    hypothesis = the generated answer. A high score means the answer states
+    something that directly conflicts with what THIS chunk says -- the
+    actual hallucination signal this stage exists to catch.
 
-    premise:    a retrieved context chunk
-    hypothesis: the LLM's answer
-
-    Returns the probability assigned to CONTRADICTION.
+    Bug this replaces: the previous version ran the zero-shot-classification
+    pipeline on `answer` alone, with candidate_labels=["entailment","neutral",
+    "contradiction"] plugged into a hypothesis template -- `chunk_text` was
+    accepted as a parameter but never referenced in the function body, so
+    the context was never compared against at all. The model was asked to
+    zero-shot classify the answer against the literal strings "entailment" /
+    "neutral" / "contradiction" as if they were topic labels, which is close
+    to meaningless for an NLI checkpoint and this task. That explains both
+    the "You must include at least one label and at least one sequence"
+    crashes under certain input shapes AND, more importantly, why Stage 3's
+    detection behavior has looked erratic/near-random across every eval run
+    so far -- it was never doing premise/hypothesis entailment checking.
     """
-    nli = get_nli_pipeline()
-
-    # zero-shot-classification format: classify answer given context as premise
-    result = nli(
-        answer,
-        candidate_labels=["entailment", "neutral", "contradiction"],
-        hypothesis_template="Based on the context: {}",
-    )
-    # Result is a dict with 'labels' and 'scores' aligned
-    label_to_score = dict(zip(result["labels"], result["scores"]))
-    return label_to_score.get("contradiction", 0.0)
+    tokenizer, model, contradiction_idx = get_nli_model()
+    premise = chunk_text[:2000]  # guard against pathologically long chunks
+    inputs = tokenizer(premise, answer, truncation=True, max_length=512, return_tensors="pt")
+    with torch.no_grad():
+        logits = model(**inputs).logits[0]
+    probs = torch.softmax(logits, dim=-1)
+    return float(probs[contradiction_idx])
 
 
 def run_stage3(chunks_text: List[str], answer: str) -> dict:
-    """
-    Execute Stage 3: NLI Cross-Check across all retrieved chunks.
-
-    For each chunk, we check if the answer *contradicts* the chunk.
-    We take the max contradiction score across chunks (conservative approach).
-
-    Returns a result dict with:
-      - score:            max contradiction probability (0–1)
-      - flagged:          bool
-      - per_chunk_scores: list of contradiction probs per chunk
-      - latency_ms
-    """
     start = time.perf_counter()
     per_chunk_scores = []
-
     for i, chunk in enumerate(chunks_text):
         try:
-            prob = _get_contradiction_prob(chunk, answer)
-            per_chunk_scores.append(prob)
-            logger.debug(f"[Stage 3] Chunk {i+1}: contradiction_prob={prob:.3f}")
+            per_chunk_scores.append(_get_contradiction_prob(chunk, answer))
         except Exception as e:
-            logger.warning(f"[Stage 3] NLI failed for chunk {i+1}: {e}")
+            logger.warning(f"[Stage 3] Chunk {i+1} failed: {e}")
             per_chunk_scores.append(0.0)
 
-    # Use max contradiction as the conservative score
     score = float(np.max(per_chunk_scores)) if per_chunk_scores else 0.0
     flagged = score > NLI_THRESHOLD
     latency_ms = (time.perf_counter() - start) * 1000
-
-    logger.info(
-        f"[Stage 3] NLI contradiction_max={score:.3f} | "
-        f"Flagged={flagged} | "
-        f"Threshold={NLI_THRESHOLD} | "
-        f"Latency={latency_ms:.0f}ms"
-    )
-
+    logger.info(f"[Stage 3] NLI={score:.3f} Flagged={flagged} {latency_ms:.0f}ms")
     return {
         "score": score,
         "flagged": flagged,

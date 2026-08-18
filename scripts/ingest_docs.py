@@ -1,16 +1,8 @@
 """
 scripts/ingest_docs.py
-Downloads AI/ML paper abstracts from arXiv (free, no API key needed)
-and builds the FAISS vector index.
-
-Run this once before starting the app:
+Downloads AI/ML paper abstracts from arXiv and builds the FAISS index.
+Run once before starting the app:
     python scripts/ingest_docs.py
-
-What it does:
-  1. Downloads ~200 paper abstracts across key AI/ML topics
-  2. Saves them as .txt files in data/sample_docs/
-  3. Chunks + embeds them
-  4. Builds and saves the FAISS index to data/faiss_index/
 """
 
 import sys
@@ -18,7 +10,6 @@ import logging
 import time
 from pathlib import Path
 
-# Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import arxiv
@@ -28,14 +19,9 @@ from config.settings import DOCS_DIR, INDEX_DIR
 from src.retrieval.chunker import load_and_chunk
 from src.retrieval.retriever import build_index
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s",
-    datefmt="%H:%M:%S",
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s", datefmt="%H:%M:%S")
 logger = logging.getLogger(__name__)
 
-# ── Topics to fetch ───────────────────────────────────────────────────────────
 SEARCH_QUERIES = [
     ("retrieval augmented generation RAG", 30),
     ("large language model hallucination", 30),
@@ -51,25 +37,13 @@ SEARCH_QUERIES = [
 
 
 def download_arxiv_papers(output_dir: Path) -> int:
-    """
-    Fetch paper abstracts from arXiv and save as .txt files.
-    Returns total number of papers saved.
-    """
     output_dir.mkdir(parents=True, exist_ok=True)
     total_saved = 0
-
     for query, max_results in SEARCH_QUERIES:
         logger.info(f"Fetching: '{query}' (max {max_results})")
-
         try:
-            search = arxiv.Search(
-                query=query,
-                max_results=max_results,
-                sort_by=arxiv.SortCriterion.Relevance,
-            )
-
+            search = arxiv.Search(query=query, max_results=max_results, sort_by=arxiv.SortCriterion.Relevance)
             for paper in tqdm(search.results(), total=max_results, desc=f"  {query[:40]}"):
-                # Build a clean document from title + abstract
                 content = (
                     f"Title: {paper.title}\n\n"
                     f"Authors: {', '.join(str(a) for a in paper.authors[:5])}\n\n"
@@ -78,20 +52,14 @@ def download_arxiv_papers(output_dir: Path) -> int:
                     f"Categories: {', '.join(paper.categories)}\n"
                     f"ArXiv ID: {paper.entry_id}\n"
                 )
-
-                # Safe filename from paper ID
                 paper_id = paper.entry_id.split("/")[-1].replace(".", "_")
                 fname = output_dir / f"{paper_id}.txt"
-
                 if not fname.exists():
                     fname.write_text(content, encoding="utf-8")
                     total_saved += 1
-
-            time.sleep(0.5)  # Be polite to arXiv API
-
+            time.sleep(0.5)
         except Exception as e:
-            logger.error(f"Failed to fetch '{query}': {e}")
-
+            logger.error(f"Failed: {e}")
     return total_saved
 
 
@@ -100,39 +68,26 @@ def main():
     logger.info("RAG Hallucination Firewall — Document Ingestion")
     logger.info("=" * 60)
 
-    # ── Step 1: Download papers ───────────────────────────────────────────────
     existing = list(DOCS_DIR.glob("*.txt"))
     if existing:
         logger.info(f"Found {len(existing)} existing docs. Skipping download.")
-        logger.info("(Delete data/sample_docs/ to re-download)")
     else:
-        logger.info("Downloading arXiv abstracts (this may take 1–2 minutes)...")
+        logger.info("Downloading arXiv abstracts...")
         n = download_arxiv_papers(DOCS_DIR)
         logger.info(f"Saved {n} papers to {DOCS_DIR}")
 
-    # ── Step 2: Chunk documents ───────────────────────────────────────────────
     logger.info("\nChunking documents...")
     chunks = load_and_chunk(DOCS_DIR)
-
     if not chunks:
-        logger.error("No chunks created. Check that docs exist in data/sample_docs/")
+        logger.error("No chunks created.")
         sys.exit(1)
+    logger.info(f"Created {len(chunks)} chunks")
 
-    logger.info(f"Created {len(chunks)} chunks from {len(list(DOCS_DIR.glob('*.txt')))} documents")
-
-    # ── Step 3: Build FAISS index ─────────────────────────────────────────────
-    logger.info("\nBuilding FAISS index (embedding model downloads ~90MB on first run)...")
+    logger.info("\nBuilding FAISS index...")
     start = time.perf_counter()
     build_index(chunks, save=True)
-    elapsed = time.perf_counter() - start
-
-    logger.info(f"FAISS index built and saved in {elapsed:.1f}s")
-    logger.info(f"Index location: {INDEX_DIR / 'faiss_store'}")
-
-    logger.info("\n" + "=" * 60)
-    logger.info("✅ Ingestion complete! Run the app with:")
-    logger.info("   streamlit run app.py")
-    logger.info("=" * 60)
+    logger.info(f"Index built in {time.perf_counter()-start:.1f}s")
+    logger.info("\n✅ Done! Run: streamlit run app.py")
 
 
 if __name__ == "__main__":
